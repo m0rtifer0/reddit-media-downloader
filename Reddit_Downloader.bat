@@ -12,7 +12,13 @@ echo  Your browser will open automatically.
 echo.
 
 :: Find R path
-set R_PATH="C:\Program Files\R\R-4.5.2\bin\Rscript.exe"
+where Rscript >nul 2>nul
+if %errorlevel% equ 0 (
+    set R_PATH=Rscript
+) else (
+    :: Fallback to a common default path if not in PATH (optional)
+    set R_PATH="C:\Program Files\R\R-4.5.2\bin\Rscript.exe"
+)
 
 :: Check if R exists
 if not exist %R_PATH% (
@@ -34,3 +40,4 @@ cd /d "%~dp0"
 echo.
 echo  Application stopped
 pause
+
