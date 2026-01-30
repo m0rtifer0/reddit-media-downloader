@@ -266,6 +266,13 @@ ui <- fluidPage(
       input[type=text]{width:100%;background:#FFFFFF;border:2px solid #000000;color:#222222;padding:12px;font-family:'Space Mono',monospace;font-size:14px;box-shadow:3px 3px 0px 0px #000000}
       input:focus{outline:none;border-color:#4F46E5;box-shadow:3px 3px 0px 0px #4F46E5}
       
+      /* Select inputs */
+      select,.selectize-input{width:100%;background:#FFFFFF;border:2px solid #000000;color:#222222;padding:12px;font-family:'Space Mono',monospace;font-size:14px;box-shadow:3px 3px 0px 0px #000000;cursor:pointer;-webkit-appearance:none;appearance:none;background-image:url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23222' d='M6 8L1 3h10z'/%3E%3C/svg%3E\");background-repeat:no-repeat;background-position:right 12px center}
+      select:focus,.selectize-input.focus{outline:none;border-color:#4F46E5;box-shadow:3px 3px 0px 0px #4F46E5}
+      .selectize-dropdown{border:2px solid #000000;background:#FFFFFF;box-shadow:3px 3px 0px 0px #000000}
+      .selectize-dropdown-content .option{padding:10px 12px;font-family:'Space Mono',monospace}
+      .selectize-dropdown-content .option.active{background:#4F46E5;color:#FFFFFF}
+      
       /* Button container */
       .btns{display:flex;gap:12px;margin-top:15px;flex-wrap:wrap}
       
@@ -354,8 +361,20 @@ ui <- fluidPage(
   div(class="main",
     div(class="box",h1("REDDIT DOWNLOADER")),
     div(class="box",
-      tags$label(tags$i(class="fa fa-link")," URL"),
-      textInput("url",NULL,placeholder="https://www.reddit.com/r/pics/.json",width="100%"),
+      tags$label(tags$i(class="fa fa-link")," Subreddit URL"),
+      textInput("url",NULL,placeholder="https://www.reddit.com/r/pics/",width="100%"),
+      
+      tags$label(style="margin-top:10px",tags$i(class="fa fa-sort")," Sort By"),
+      selectInput("sort_by", NULL, choices = list(
+        "Hot" = "hot",
+        "New" = "new",
+        "Rising" = "rising",
+        "Top - All Time" = "top_all",
+        "Top - Year" = "top_year",
+        "Top - Month" = "top_month",
+        "Top - Week" = "top_week",
+        "Top - Day" = "top_day"
+      ), selected = "hot", width = "100%"),
       
       tags$label(style="margin-top:10px",tags$i(class="fa fa-folder")," Download Folder"),
       div(class="folder-input",
@@ -852,8 +871,32 @@ server <- function(input, output, session) {
     sub <- str_match(input$url, "/r/([^/]+)")[1, 2]
     if (is.na(sub)) sub <- "reddit"
     
-    e$base <- input$url
-    if (!grepl("\\.json", e$base)) e$base <- paste0(gsub("/$", "", e$base), "/.json")
+    # Construct base URL with sorting
+    base_url <- gsub("(^https?://[^/]+)?(/r/[^/]+).*", "\\1\\2", input$url)
+    if (!grepl("^https?://", base_url)) base_url <- paste0("https://www.reddit.com", base_url)
+    
+    # Add sorting path and time parameter
+    sort_opt <- input$sort_by
+    if (sort_opt == "hot") {
+      e$base <- paste0(base_url, "/hot.json")
+    } else if (sort_opt == "new") {
+      e$base <- paste0(base_url, "/new.json")
+    } else if (sort_opt == "rising") {
+      e$base <- paste0(base_url, "/rising.json")
+    } else if (sort_opt == "top_all") {
+      e$base <- paste0(base_url, "/top.json?t=all")
+    } else if (sort_opt == "top_year") {
+      e$base <- paste0(base_url, "/top.json?t=year")
+    } else if (sort_opt == "top_month") {
+      e$base <- paste0(base_url, "/top.json?t=month")
+    } else if (sort_opt == "top_week") {
+      e$base <- paste0(base_url, "/top.json?t=week")
+    } else if (sort_opt == "top_day") {
+      e$base <- paste0(base_url, "/top.json?t=day")
+    } else {
+      e$base <- paste0(base_url, "/.json")
+    }
+    
     e$maxpg <- input$pages
     
     log(paste("Target:", sub))
