@@ -9,7 +9,7 @@ A Shiny R application for downloading media files from Reddit. Features a previe
 - **Batch Selection**: "Select All" and "Deselect All" buttons for quick selection
 - **Custom Download Location**: Choose where to save your files using the folder browser
 - **Multiple Media Types**: Supports images (JPG, PNG, GIF, WebP), videos (MP4), Reddit galleries, and Redgifs
-- **Pagination Support**: Scan multiple pages of a subreddit (1-10 pages)
+- **Pagination Support**: Scan multiple pages of a subreddit (1-1000 pages)
 
 ## Requirements
 
@@ -99,3 +99,4 @@ MIT License - see LICENSE file for details.
 ## Disclaimer
 
 This tool is for personal use only. Please respect Reddit's Terms of Service and the rights of content creators. Do not use this tool to download or distribute copyrighted material without permission.
+
