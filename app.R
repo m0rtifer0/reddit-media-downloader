@@ -261,24 +261,35 @@ ui <- fluidPage(
       .shiny-input-container{width:100%!important}.irs--shiny .irs-bar,.irs--shiny .irs-handle{background:#fff;border-color:#fff}.irs--shiny .irs-line{background:#333}
       
       .preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:15px;margin-top:15px;max-height:500px;overflow-y:auto;padding:5px}
-      .preview-item{border:1px solid #333;padding:10px;position:relative;transition:all 0.2s}
+      .preview-item{border:1px solid #333;padding:10px;position:relative;transition:all 0.2s;cursor:pointer}
       .preview-item:hover{border-color:#666}
       .preview-item.selected{border-color:#27ca40;background:rgba(39,202,64,0.1)}
-      .preview-thumb{width:100%;height:120px;object-fit:cover;background:#1a1a1a;display:flex;align-items:center;justify-content:center}
+      .preview-item.failed{border-color:#ff5f56;background:rgba(255,95,86,0.1)}
+      .preview-thumb{width:100%;height:120px;object-fit:cover;background:#1a1a1a;display:flex;align-items:center;justify-content:center;cursor:pointer}
       .preview-thumb img{max-width:100%;max-height:100%;object-fit:contain}
       .preview-icon{font-size:40px;color:#444}
       .preview-info{margin-top:8px;font-size:10px;color:#888;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .preview-type{position:absolute;top:5px;right:5px;background:rgba(0,0,0,0.7);padding:2px 6px;font-size:9px;text-transform:uppercase}
-      .preview-check{position:absolute;top:5px;left:5px;width:20px;height:20px;background:#333;border:1px solid #555;cursor:pointer;display:flex;align-items:center;justify-content:center}
+      .preview-check{position:absolute;top:5px;left:5px;width:20px;height:20px;background:#333;border:1px solid #555;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10}
       .preview-check.checked{background:#27ca40;border-color:#27ca40}
       .preview-check i{color:#fff;font-size:12px}
+      .preview-view{position:absolute;bottom:5px;right:5px;width:24px;height:24px;background:rgba(0,0,0,0.7);border:1px solid #555;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10}
+      .preview-view:hover{background:#333}
+      .preview-view i{color:#fff;font-size:10px}
       
       .folder-input{display:flex;gap:10px;align-items:flex-end}
       .folder-input .shiny-input-container{flex:1}
       .folder-btn{height:38px;white-space:nowrap}
       
-      .selection-bar{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #333;margin-bottom:10px}
+      .selection-bar{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #333;margin-bottom:10px;flex-wrap:wrap;gap:10px}
       .selection-info{font-size:12px;color:#888}
+      .selection-buttons{display:flex;gap:5px;flex-wrap:wrap}
+      
+      .media-modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);z-index:1000;display:none;align-items:center;justify-content:center}
+      .media-modal.active{display:flex}
+      .media-modal-content{max-width:90%;max-height:90%;position:relative}
+      .media-modal-content img,.media-modal-content video{max-width:100%;max-height:90vh;object-fit:contain}
+      .media-modal-close{position:absolute;top:-30px;right:0;color:#fff;font-size:24px;cursor:pointer}
     "))
   ),
   div(class="bar",div(class="dots",span(class="dot r"),span(class="dot y"),span(class="dot g")),span(class="title","REDDIT MEDIA DOWNLOADER")),
@@ -352,6 +363,37 @@ ui <- fluidPage(
       var el = document.getElementById('selection-count');
       if (el) el.textContent = d.count + ' of ' + d.total + ' selected';
     });
+    
+    // Toggle item without causing scroll/re-render
+    function toggleItemLocal(index, event) {
+      if (event) event.stopPropagation();
+      Shiny.setInputValue('toggle_item', index, {priority: 'event'});
+    }
+    
+    // View media in modal
+    function viewMedia(url, type, event) {
+      if (event) event.stopPropagation();
+      // Open in new tab
+      window.open(url, '_blank');
+    }
+    
+    // Mark item as failed
+    Shiny.addCustomMessageHandler('markFailed', function(d) {
+      var item = document.querySelector('[data-index=\"' + d.index + '\"]');
+      if (item) {
+        item.classList.add('failed');
+        item.setAttribute('data-error', d.error || 'Download failed');
+      }
+    });
+    
+    // Clear failed status
+    Shiny.addCustomMessageHandler('clearFailed', function(d) {
+      var items = document.querySelectorAll('.preview-item.failed');
+      items.forEach(function(item) {
+        item.classList.remove('failed');
+        item.removeAttribute('data-error');
+      });
+    });
   "))
 )
 
@@ -378,7 +420,8 @@ server <- function(input, output, session) {
   rv <- reactiveValues(
     items = list(),
     selected = c(),
-    show_preview = FALSE
+    show_preview = FALSE,
+    failed_items = c()  # Track indices of failed downloads
   )
   
   # Setup folder chooser
@@ -406,14 +449,15 @@ server <- function(input, output, session) {
       div(class="selection-bar",
         span(id="selection-count", class="selection-info", 
           paste0(length(rv$selected), " of ", length(rv$items), " selected")),
-        div(
+        div(class="selection-buttons",
           actionButton("select_all", tagList(tags$i(class="fa fa-check-square"), " Select All"), class="btn"),
           actionButton("deselect_all", tagList(tags$i(class="fa fa-square"), " Deselect All"), class="btn"),
+          actionButton("retry_failed", tagList(tags$i(class="fa fa-redo"), " Retry Failed"), class="btn"),
           actionButton("download_selected", tagList(tags$i(class="fa fa-download"), " Download Selected"), class="btn p",
             disabled = if(length(rv$selected) == 0) "disabled" else NULL)
         )
       ),
-      div(class="preview-grid",
+      div(class="preview-grid", id="preview-grid",
         lapply(seq_along(rv$items), function(i) {
           item <- rv$items[[i]]
           is_selected <- i %in% rv$selected
@@ -425,14 +469,21 @@ server <- function(input, output, session) {
             "fa-image"
           )
           
+          # Get view URL (preview or original)
+          view_url <- if (!is.null(item$preview) && nchar(item$preview) > 0) item$preview else gsub("^REDGIFS:", "", item$url)
+          
           div(class=paste("preview-item", if(is_selected) "selected" else ""),
             `data-index` = i,
-            onclick = paste0("Shiny.setInputValue('toggle_item', ", i, ", {priority: 'event'})"),
+            `data-url` = view_url,
+            # Clicking the checkbox area toggles selection
             div(class=paste("preview-check", if(is_selected) "checked" else ""),
+              onclick = paste0("event.stopPropagation(); Shiny.setInputValue('toggle_item', ", i, ", {priority: 'event'})"),
               if(is_selected) tags$i(class="fa fa-check") else NULL
             ),
             span(class="preview-type", item$type),
+            # Clicking the thumbnail opens media
             div(class="preview-thumb",
+              onclick = paste0("event.stopPropagation(); window.open('", gsub("'", "\\\\'", view_url), "', '_blank')"),
               if (!is.null(item$preview) && nchar(item$preview) > 0) {
                 tags$img(src = item$preview, loading = "lazy", 
                   onerror = "this.style.display='none'; this.nextElementSibling.style.display='flex';")
@@ -440,7 +491,16 @@ server <- function(input, output, session) {
               div(class="preview-icon", style = if(!is.null(item$preview) && nchar(item$preview) > 0) "display:none" else "",
                 tags$i(class = paste("fa", icon_class)))
             ),
-            div(class="preview-info", title = item$title, item$title)
+            # View button
+            div(class="preview-view",
+              onclick = paste0("event.stopPropagation(); window.open('", gsub("'", "\\\\'", view_url), "', '_blank')"),
+              title = "View media",
+              tags$i(class="fa fa-external-link-alt")
+            ),
+            # Clicking title toggles selection
+            div(class="preview-info", title = item$title, 
+              onclick = paste0("event.stopPropagation(); Shiny.setInputValue('toggle_item', ", i, ", {priority: 'event'})"),
+              item$title)
           )
         })
       )
@@ -580,8 +640,10 @@ server <- function(input, output, session) {
       
       if (is.null(result) || is.null(result$url)) {
         e$fail <- e$fail + 1
+        e$failed_indices <- c(e$failed_indices, idx)
         upd(n3 = e$fail)
         log("Redgifs fetch failed", "e")
+        session$sendCustomMessage("markFailed", list(index = idx, error = "Redgifs API error"))
         pct <- round((e$i / length(e$download_list)) * 100)
         upd(n4 = pct, pb = pct)
         e$i <- e$i + 1
@@ -618,9 +680,11 @@ server <- function(input, output, session) {
       log(fn, "s")
     } else {
       e$fail <- e$fail + 1
+      e$failed_indices <- c(e$failed_indices, idx)
       upd(n3 = e$fail)
       if (file.exists(fp)) file.remove(fp)
       log(paste("Failed:", fn), "e")
+      session$sendCustomMessage("markFailed", list(index = idx, error = "Download failed"))
     }
     
     pct <- round((e$i / length(e$download_list)) * 100)
@@ -675,6 +739,10 @@ server <- function(input, output, session) {
     e$i <- 1
     e$done <- 0
     e$fail <- 0
+    e$failed_indices <- c()  # Reset failed indices
+    
+    # Clear previous failed status in UI
+    session$sendCustomMessage("clearFailed", list())
     
     # Get download folder
     e$dir <- input$folder_path
@@ -690,6 +758,41 @@ server <- function(input, output, session) {
     
     upd(n2 = 0, n3 = 0, n4 = 0, pb = 0, st = "Starting download...")
     log(paste("Downloading", length(rv$selected), "files to", e$dir))
+    
+    later::later(dl_next, 0.2)
+  })
+  
+  # Retry failed downloads
+  observeEvent(input$retry_failed, {
+    req(length(e$failed_indices) > 0)
+    
+    e$run <- TRUE
+    e$downloading <- TRUE
+    e$download_list <- e$failed_indices
+    e$items_for_download <- rv$items
+    e$i <- 1
+    e$done <- 0
+    e$fail <- 0
+    old_failed <- e$failed_indices
+    e$failed_indices <- c()
+    
+    # Clear failed status in UI for items being retried
+    session$sendCustomMessage("clearFailed", list())
+    
+    # Use existing directory or create new one
+    if (is.null(e$dir) || e$dir == "" || !dir.exists(e$dir)) {
+      e$dir <- input$folder_path
+      if (is.null(e$dir) || e$dir == "") {
+        e$dir <- getwd()
+      }
+      sub <- str_match(input$url, "/r/([^/]+)")[1, 2]
+      if (is.na(sub)) sub <- "reddit"
+      e$dir <- file.path(e$dir, paste0(sub, "_retry_", format(Sys.time(), "%Y%m%d_%H%M%S")))
+      dir.create(e$dir, recursive = TRUE, showWarnings = FALSE)
+    }
+    
+    upd(n2 = 0, n3 = 0, n4 = 0, pb = 0, st = "Retrying failed downloads...")
+    log(paste("Retrying", length(old_failed), "failed downloads"))
     
     later::later(dl_next, 0.2)
   })
