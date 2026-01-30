@@ -285,7 +285,7 @@ ui <- fluidPage(
       ),
       
       tags$label(style="margin-top:10px",tags$i(class="fa fa-list")," Pages to Scan"),
-      sliderInput("pages",NULL,1,10,5,width="100%"),
+      sliderInput("pages",NULL,1,1000,10,width="100%"),
       div(class="btns",
         actionButton("scan",tagList(tags$i(class="fa fa-search")," SCAN"),class="btn p"),
         actionButton("stop",tagList(tags$i(class="fa fa-stop")," STOP"),class="btn")
@@ -470,54 +470,72 @@ server <- function(input, output, session) {
   
   # Scan function
   scan_next <- function() {
-    if (!e$run || e$pg >= e$maxpg) {
-      # Scanning complete
-      e$scanning <- FALSE
-      e$found <- length(e$items)
-      rv$items <- e$items
-      rv$selected <- seq_along(e$items)  # Select all by default
-      rv$show_preview <- TRUE
-      upd(n1 = e$found, st = paste("Found", e$found, "media files - Select and download"))
-      log(paste("Scan complete.", e$found, "files found"), "s")
-      return()
-    }
-    
-    e$pg <- e$pg + 1
-    upd(st = paste("Scanning page", e$pg, "/", e$maxpg))
-    log(paste("Scanning page", e$pg))
-    
-    data <- fetch_page(e$base, e$after)
-    
-    if (is.null(data) || length(data$data$children) == 0) {
+    tryCatch({
+      if (!e$run || e$pg >= e$maxpg) {
+        # Scanning complete
+        e$scanning <- FALSE
+        e$found <- length(e$items)
+        rv$items <- e$items
+        rv$selected <- seq_along(e$items)  # Select all by default
+        rv$show_preview <- TRUE
+        upd(n1 = e$found, st = paste("Found", e$found, "media files - Select and download"))
+        log(paste("Scan complete.", e$found, "files found"), "s")
+        return()
+      }
+      
+      e$pg <- e$pg + 1
+      upd(st = paste("Scanning page", e$pg, "/", e$maxpg))
+      log(paste("Scanning page", e$pg))
+      
+      data <- fetch_page(e$base, e$after)
+      
+      # Check if we got valid data
+      if (is.null(data) || is.null(data$data) || is.null(data$data$children) || length(data$data$children) == 0) {
+        # No more pages available - finish scan
+        e$found <- length(e$items)
+        rv$items <- e$items
+        rv$selected <- seq_along(e$items)
+        rv$show_preview <- TRUE
+        upd(n1 = e$found, st = paste("Found", e$found, "media files - Select and download"))
+        log(paste("Reached end of available pages. Scan complete.", e$found, "files found"), "s")
+        e$scanning <- FALSE
+        return()
+      }
+      
+      for (child in data$data$children) {
+        if (!is.null(child$data)) {
+          new_items <- get_media(child$data)
+          e$items <- append(e$items, new_items)
+        }
+      }
+      
+      # Remove duplicates
+      if (length(e$items) > 0) {
+        norm <- sapply(e$items, function(x) normalize_url(gsub("^REDGIFS:", "", x$url)))
+        e$items <- e$items[!duplicated(norm)]
+      }
+      
+      upd(n1 = length(e$items))
+      
+      # Check for next page token
+      e$after <- data$data$after
+      if (is.null(e$after) || is.na(e$after) || e$after == "") {
+        # No more pages - stop scanning
+        e$pg <- e$maxpg
+      }
+      
+      later::later(scan_next, 0.5)
+    }, error = function(err) {
+      # Handle any unexpected errors gracefully
+      log(paste("Scan error:", err$message), "e")
       e$found <- length(e$items)
       rv$items <- e$items
       rv$selected <- seq_along(e$items)
       rv$show_preview <- TRUE
       upd(n1 = e$found, st = paste("Found", e$found, "media files - Select and download"))
-      log(paste("Scan complete.", e$found, "files found"), "s")
+      log(paste("Scan stopped due to error.", e$found, "files found"), "s")
       e$scanning <- FALSE
-      return()
-    }
-    
-    for (child in data$data$children) {
-      if (!is.null(child$data)) {
-        new_items <- get_media(child$data)
-        e$items <- append(e$items, new_items)
-      }
-    }
-    
-    # Remove duplicates
-    if (length(e$items) > 0) {
-      norm <- sapply(e$items, function(x) normalize_url(gsub("^REDGIFS:", "", x$url)))
-      e$items <- e$items[!duplicated(norm)]
-    }
-    
-    upd(n1 = length(e$items))
-    
-    e$after <- data$data$after
-    if (is.null(e$after)) e$pg <- e$maxpg
-    
-    later::later(scan_next, 0.5)
+    })
   }
   
   # Download function
