@@ -180,10 +180,20 @@ get_media <- function(p) {
     items[[i]]$url <- gsub("\\.gifv$", ".mp4", items[[i]]$url, ignore.case = TRUE)
   }
   
-  # Remove duplicates based on normalized URL
+  # Remove duplicates based on normalized URL and title
   if (length(items) > 0) {
-    norm <- sapply(items, function(x) normalize_url(gsub("^REDGIFS:", "", x$url)))
-    items <- items[!duplicated(norm)]
+    # Create unique key from URL base and title
+    keys <- sapply(items, function(x) {
+      url_norm <- normalize_url(gsub("^REDGIFS:", "", x$url))
+      # Extract filename/id from URL for comparison
+      url_base <- basename(gsub("\\?.*$", "", url_norm))
+      paste0(x$title, "|", url_base)
+    })
+    items <- items[!duplicated(keys)]
+    
+    # Also deduplicate by title alone for same post (keep first occurrence)
+    titles <- sapply(items, function(x) x$title)
+    items <- items[!duplicated(titles)]
   }
   
   items
@@ -511,8 +521,17 @@ server <- function(input, output, session) {
       
       # Remove duplicates
       if (length(e$items) > 0) {
-        norm <- sapply(e$items, function(x) normalize_url(gsub("^REDGIFS:", "", x$url)))
-        e$items <- e$items[!duplicated(norm)]
+        # Create unique key from title and URL base
+        keys <- sapply(e$items, function(x) {
+          url_norm <- normalize_url(gsub("^REDGIFS:", "", x$url))
+          url_base <- basename(gsub("\\?.*$", "", url_norm))
+          paste0(x$title, "|", url_base)
+        })
+        e$items <- e$items[!duplicated(keys)]
+        
+        # Also deduplicate by title alone (keep first occurrence)
+        titles <- sapply(e$items, function(x) x$title)
+        e$items <- e$items[!duplicated(titles)]
       }
       
       upd(n1 = length(e$items))
