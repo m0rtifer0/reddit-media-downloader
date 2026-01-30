@@ -1,0 +1,28 @@
+# R environment
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# Downloaded media folders
+*_202*/
+
+# IDE settings
+.vscode/
+.idea/
+*.Rproj
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Log files
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Sample/test files
+sample_response.json
