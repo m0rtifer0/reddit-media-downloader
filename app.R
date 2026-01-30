@@ -386,6 +386,13 @@ ui <- fluidPage(
       div(class="log",id="lg")
     )
   ),
+  # Media preview modal
+  div(id="media-modal", class="media-modal", onclick="closeMediaModal(event)",
+    div(class="media-modal-content", onclick="event.stopPropagation()",
+      span(class="media-modal-close", onclick="closeMediaModal()", tags$i(class="fa fa-times")),
+      div(id="media-modal-body")
+    )
+  ),
   tags$script(HTML("
     Shiny.addCustomMessageHandler('upd', function(d) {
       if(d.n1 !== undefined) document.getElementById('n1').textContent = d.n1;
@@ -428,12 +435,70 @@ ui <- fluidPage(
       Shiny.setInputValue('toggle_item', index, {priority: 'event'});
     }
     
-    // View media in modal
+    // View media in modal popup
     function viewMedia(url, type, event) {
       if (event) event.stopPropagation();
-      // Open in new tab
-      window.open(url, '_blank');
+      var modal = document.getElementById('media-modal');
+      var body = document.getElementById('media-modal-body');
+      
+      // Clear previous content
+      body.innerHTML = '';
+      
+      // Determine media type from URL
+      var isVideo = type === 'video' || url.match(/[.](mp4|webm|mov)$/i) || url.includes('v.redd.it');
+      var isGif = type === 'gif' || url.match(/[.]gif$/i);
+      
+      if (isVideo) {
+        var video = document.createElement('video');
+        video.src = url;
+        video.controls = true;
+        video.autoplay = true;
+        video.style.maxWidth = '100%';
+        video.style.maxHeight = '80vh';
+        video.style.border = '2px solid #000000';
+        video.style.background = '#000';
+        
+        // Error handler for unsupported video formats
+        video.onerror = function() {
+          body.innerHTML = '';
+          var errorDiv = document.createElement('div');
+          errorDiv.style.cssText = 'text-align:center;padding:40px;font-family:Space Mono,monospace;';
+          errorDiv.innerHTML = '<p style=\"margin-bottom:20px;color:#222;\">Video format not supported in browser preview.</p>' +
+            '<a href=\"' + url + '\" target=\"_blank\" style=\"display:inline-block;padding:12px 24px;background:#4F46E5;color:#fff;text-decoration:none;border:2px solid #000;box-shadow:4px 4px 0 #000;font-weight:700;\">OPEN IN NEW TAB</a>';
+          body.appendChild(errorDiv);
+        };
+        
+        body.appendChild(video);
+      } else {
+        var img = document.createElement('img');
+        img.src = url;
+        img.style.maxWidth = '100%';
+        img.style.maxHeight = '80vh';
+        img.style.border = '2px solid #000000';
+        body.appendChild(img);
+      }
+      
+      modal.classList.add('active');
+      document.body.style.overflow = 'hidden';
     }
+    
+    // Close media modal
+    function closeMediaModal(event) {
+      if (event && event.target.id !== 'media-modal') return;
+      var modal = document.getElementById('media-modal');
+      var body = document.getElementById('media-modal-body');
+      modal.classList.remove('active');
+      document.body.style.overflow = '';
+      // Stop video if playing
+      var video = body.querySelector('video');
+      if (video) video.pause();
+      body.innerHTML = '';
+    }
+    
+    // Close modal on Escape key
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') closeMediaModal();
+    });
     
     // Mark item as failed
     Shiny.addCustomMessageHandler('markFailed', function(d) {
@@ -503,22 +568,27 @@ server <- function(input, output, session) {
   output$preview_section <- renderUI({
     if (!rv$show_preview || length(rv$items) == 0) return(NULL)
     
+    # Use isolate to prevent re-rendering when selection changes
+    # Selection state is handled entirely via JavaScript
+    initial_selected <- isolate(rv$selected)
+    initial_count <- length(initial_selected)
+    total_count <- length(rv$items)
+    
     div(class="box",
       div(class="selection-bar",
         span(id="selection-count", class="selection-info", 
-          paste0(length(rv$selected), " of ", length(rv$items), " selected")),
+          paste0(initial_count, " of ", total_count, " selected")),
         div(class="selection-buttons",
           actionButton("select_all", tagList(tags$i(class="fa fa-check-square"), " Select All"), class="btn"),
           actionButton("deselect_all", tagList(tags$i(class="fa fa-square"), " Deselect All"), class="btn"),
           actionButton("retry_failed", tagList(tags$i(class="fa fa-redo"), " Retry Failed"), class="btn"),
-          actionButton("download_selected", tagList(tags$i(class="fa fa-download"), " Download Selected"), class="btn p",
-            disabled = if(length(rv$selected) == 0) "disabled" else NULL)
+          actionButton("download_selected", tagList(tags$i(class="fa fa-download"), " Download Selected"), class="btn p")
         )
       ),
       div(class="preview-grid", id="preview-grid",
         lapply(seq_along(rv$items), function(i) {
           item <- rv$items[[i]]
-          is_selected <- i %in% rv$selected
+          is_selected <- i %in% initial_selected
           
           # Determine icon based on type
           icon_class <- switch(item$type,
@@ -527,8 +597,14 @@ server <- function(input, output, session) {
             "fa-image"
           )
           
-          # Get view URL (preview or original)
-          view_url <- if (!is.null(item$preview) && nchar(item$preview) > 0) item$preview else gsub("^REDGIFS:", "", item$url)
+          # Get view URL - for videos use original URL, for images use preview
+          view_url <- if (item$type == "video" || item$type == "gif") {
+            gsub("^REDGIFS:", "", item$url)
+          } else if (!is.null(item$preview) && nchar(item$preview) > 0) {
+            item$preview
+          } else {
+            gsub("^REDGIFS:", "", item$url)
+          }
           
           div(class=paste("preview-item", if(is_selected) "selected" else ""),
             `data-index` = i,
@@ -539,9 +615,9 @@ server <- function(input, output, session) {
               if(is_selected) tags$i(class="fa fa-check") else NULL
             ),
             span(class="preview-type", item$type),
-            # Clicking the thumbnail opens media
+            # Clicking the thumbnail opens media in modal
             div(class="preview-thumb",
-              onclick = paste0("event.stopPropagation(); window.open('", gsub("'", "\\\\'", view_url), "', '_blank')"),
+              onclick = paste0("event.stopPropagation(); viewMedia('", gsub("'", "\\'", view_url), "', '", item$type, "', event)"),
               if (!is.null(item$preview) && nchar(item$preview) > 0) {
                 tags$img(src = item$preview, loading = "lazy", 
                   onerror = "this.style.display='none'; this.nextElementSibling.style.display='flex';")
@@ -551,9 +627,9 @@ server <- function(input, output, session) {
             ),
             # View button
             div(class="preview-view",
-              onclick = paste0("event.stopPropagation(); window.open('", gsub("'", "\\\\'", view_url), "', '_blank')"),
+              onclick = paste0("event.stopPropagation(); viewMedia('", gsub("'", "\\'", view_url), "', '", item$type, "', event)"),
               title = "View media",
-              tags$i(class="fa fa-external-link-alt")
+              tags$i(class="fa fa-eye")
             ),
             # Clicking title toggles selection
             div(class="preview-info", title = item$title, 
