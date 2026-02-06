@@ -88,92 +88,149 @@ get_preview_url <- function(url) {
 get_media <- function(p) {
   items <- list()
   
-  if (!is.null(p$url)) {
-    url <- p$url
+  # Safety check - ensure p is a list
+ if (is.null(p) || !is.list(p)) {
+    return(items)
+  }
+  
+  # Extract common metadata with tryCatch for safety
+  author <- tryCatch({
+    if (!is.null(p$author) && is.character(p$author)) p$author else "unknown"
+  }, error = function(e) "unknown")
+  
+  created_utc <- tryCatch({
+    if (!is.null(p$created_utc) && is.numeric(p$created_utc)) p$created_utc else 0
+  }, error = function(e) 0)
+  
+  # Extract upvotes
+  upvotes <- tryCatch({
+    if (!is.null(p$ups) && is.numeric(p$ups)) p$ups else if (!is.null(p$score) && is.numeric(p$score)) p$score else 0
+  }, error = function(e) 0)
+  
+  post_date <- tryCatch({
+    format(as.POSIXct(created_utc, origin = "1970-01-01", tz = "UTC"), "%Y%m%d")
+  }, error = function(e) format(Sys.Date(), "%Y%m%d"))
+  
+  # Safely get URL
+  url <- tryCatch({
+    if (!is.null(p$url) && is.character(p$url)) p$url else NULL
+  }, error = function(e) NULL)
+  
+  if (!is.null(url)) {
     preview <- NULL
-    title <- if (!is.null(p$title)) substr(p$title, 1, 50) else "Media"
+    title <- tryCatch({
+      if (!is.null(p$title) && is.character(p$title)) substr(p$title, 1, 50) else "Media"
+    }, error = function(e) "Media")
     
     # Try to get preview from post
-    if (!is.null(p$preview$images[[1]]$source$url)) {
-      preview <- gsub("&amp;", "&", p$preview$images[[1]]$source$url)
-    }
+    tryCatch({
+      if (!is.null(p$preview$images[[1]]$source$url)) {
+        preview <- gsub("&amp;", "&", p$preview$images[[1]]$source$url)
+      }
+    }, error = function(e) NULL)
     
     if (grepl("i\\.redd\\.it/", url)) {
-      items <- append(items, list(list(url = url, preview = if (is.null(preview)) url else preview, title = title, type = "image")))
+      items <- append(items, list(list(url = url, preview = if (is.null(preview)) url else preview, title = title, type = "image", author = author, date = post_date, upvotes = upvotes)))
     } else if (grepl("\\.(jpg|jpeg|png|gif|gifv|webp|mp4)($|\\?)", url, ignore.case = TRUE)) {
       ftype <- if (grepl("\\.(mp4|gifv)($|\\?)", url, ignore.case = TRUE)) "video" else "image"
-      items <- append(items, list(list(url = url, preview = preview, title = title, type = ftype)))
+      items <- append(items, list(list(url = url, preview = preview, title = title, type = ftype, author = author, date = post_date, upvotes = upvotes)))
     } else if (grepl("redgifs\\.com/(watch|ifr)/", url, ignore.case = TRUE)) {
-      items <- append(items, list(list(url = paste0("REDGIFS:", url), preview = NULL, title = title, type = "video")))
+      items <- append(items, list(list(url = paste0("REDGIFS:", url), preview = NULL, title = title, type = "video", author = author, date = post_date, upvotes = upvotes)))
     } else if (grepl("gfycat\\.com/", url, ignore.case = TRUE)) {
-      items <- append(items, list(list(url = paste0("REDGIFS:", url), preview = NULL, title = title, type = "video")))
+      items <- append(items, list(list(url = paste0("REDGIFS:", url), preview = NULL, title = title, type = "video", author = author, date = post_date, upvotes = upvotes)))
     }
   }
   
-  if (isTRUE(p$is_video)) {
+  # Check for Reddit video
+  is_video <- tryCatch(isTRUE(p$is_video), error = function(e) FALSE)
+  if (is_video) {
     video_url <- NULL
     preview <- NULL
-    title <- if (!is.null(p$title)) substr(p$title, 1, 50) else "Video"
+    title <- tryCatch({
+      if (!is.null(p$title) && is.character(p$title)) substr(p$title, 1, 50) else "Video"
+    }, error = function(e) "Video")
     
-    if (!is.null(p$preview$images[[1]]$source$url)) {
-      preview <- gsub("&amp;", "&", p$preview$images[[1]]$source$url)
-    }
+    tryCatch({
+      if (!is.null(p$preview$images[[1]]$source$url)) {
+        preview <- gsub("&amp;", "&", p$preview$images[[1]]$source$url)
+      }
+    }, error = function(e) NULL)
     
-    if (!is.null(p$media$reddit_video$fallback_url)) {
-      video_url <- p$media$reddit_video$fallback_url
-    } else if (!is.null(p$secure_media$reddit_video$fallback_url)) {
-      video_url <- p$secure_media$reddit_video$fallback_url
-    }
+    tryCatch({
+      if (!is.null(p$media$reddit_video$fallback_url)) {
+        video_url <- p$media$reddit_video$fallback_url
+      } else if (!is.null(p$secure_media$reddit_video$fallback_url)) {
+        video_url <- p$secure_media$reddit_video$fallback_url
+      }
+    }, error = function(e) NULL)
+    
     if (!is.null(video_url)) {
       video_url <- gsub("\\?source=fallback", "", video_url)
-      items <- append(items, list(list(url = video_url, preview = preview, title = title, type = "video")))
+      items <- append(items, list(list(url = video_url, preview = preview, title = title, type = "video", author = author, date = post_date, upvotes = upvotes)))
     }
   }
   
-  if (!is.null(p$preview$reddit_video_preview$fallback_url)) {
-    preview <- NULL
-    if (!is.null(p$preview$images[[1]]$source$url)) {
-      preview <- gsub("&amp;", "&", p$preview$images[[1]]$source$url)
+  # Check for reddit video preview
+  tryCatch({
+    if (!is.null(p$preview$reddit_video_preview$fallback_url)) {
+      preview <- NULL
+      if (!is.null(p$preview$images[[1]]$source$url)) {
+        preview <- gsub("&amp;", "&", p$preview$images[[1]]$source$url)
+      }
+      items <- append(items, list(list(
+        url = gsub("\\?source=fallback", "", p$preview$reddit_video_preview$fallback_url),
+        preview = preview,
+        title = tryCatch(if (!is.null(p$title)) substr(p$title, 1, 50) else "Video Preview", error = function(e) "Video Preview"),
+        type = "video",
+        author = author,
+        date = post_date,
+        upvotes = upvotes
+      )))
     }
-    items <- append(items, list(list(
-      url = gsub("\\?source=fallback", "", p$preview$reddit_video_preview$fallback_url),
-      preview = preview,
-      title = if (!is.null(p$title)) substr(p$title, 1, 50) else "Video Preview",
-      type = "video"
-    )))
-  }
+  }, error = function(e) NULL)
   
-  if (isTRUE(p$is_gallery) && !is.null(p$media_metadata)) {
-    title <- if (!is.null(p$title)) substr(p$title, 1, 50) else "Gallery"
+  # Check for gallery
+  is_gallery <- tryCatch(isTRUE(p$is_gallery), error = function(e) FALSE)
+  has_metadata <- tryCatch(!is.null(p$media_metadata) && is.list(p$media_metadata), error = function(e) FALSE)
+  
+  if (is_gallery && has_metadata) {
+    title <- tryCatch({
+      if (!is.null(p$title) && is.character(p$title)) substr(p$title, 1, 50) else "Gallery"
+    }, error = function(e) "Gallery")
     idx <- 1
     for (item in p$media_metadata) {
-      if (!is.null(item$s)) {
-        if (!is.null(item$s$u)) {
-          img_url <- gsub("&amp;", "&", item$s$u)
-          img_url <- gsub("preview\\.redd\\.it", "i.redd.it", img_url)
-          img_url <- gsub("\\?.*$", "", img_url)
-          items <- append(items, list(list(url = img_url, preview = gsub("&amp;", "&", item$s$u), title = paste0(title, " (", idx, ")"), type = "image")))
-        } else if (!is.null(item$s$gif)) {
-          items <- append(items, list(list(url = gsub("&amp;", "&", item$s$gif), preview = NULL, title = paste0(title, " (", idx, ")"), type = "gif")))
-        } else if (!is.null(item$s$mp4)) {
-          items <- append(items, list(list(url = gsub("&amp;", "&", item$s$mp4), preview = NULL, title = paste0(title, " (", idx, ")"), type = "video")))
+      tryCatch({
+        if (!is.null(item$s)) {
+          if (!is.null(item$s$u)) {
+            img_url <- gsub("&amp;", "&", item$s$u)
+            img_url <- gsub("preview\\.redd\\.it", "i.redd.it", img_url)
+            img_url <- gsub("\\?.*$", "", img_url)
+            items <- append(items, list(list(url = img_url, preview = gsub("&amp;", "&", item$s$u), title = paste0(title, " (", idx, ")"), type = "image", author = author, date = post_date, upvotes = upvotes)))
+          } else if (!is.null(item$s$gif)) {
+            items <- append(items, list(list(url = gsub("&amp;", "&", item$s$gif), preview = NULL, title = paste0(title, " (", idx, ")"), type = "gif", author = author, date = post_date, upvotes = upvotes)))
+          } else if (!is.null(item$s$mp4)) {
+            items <- append(items, list(list(url = gsub("&amp;", "&", item$s$mp4), preview = NULL, title = paste0(title, " (", idx, ")"), type = "video", author = author, date = post_date, upvotes = upvotes)))
+          }
+          idx <- idx + 1
         }
-        idx <- idx + 1
-      }
+      }, error = function(e) NULL)
     }
   }
   
-  if (!is.null(p$preview$images)) {
-    for (img in p$preview$images) {
-      if (!is.null(img$variants$mp4$source$url)) {
-        mp4_url <- gsub("&amp;", "&", img$variants$mp4$source$url)
-        items <- append(items, list(list(url = mp4_url, preview = NULL, title = "Animated", type = "video")))
-      } else if (!is.null(img$variants$gif$source$url)) {
-        gif_url <- gsub("&amp;", "&", img$variants$gif$source$url)
-        items <- append(items, list(list(url = gif_url, preview = NULL, title = "GIF", type = "gif")))
+  # Check for preview images
+  tryCatch({
+    if (!is.null(p$preview$images) && is.list(p$preview$images)) {
+      for (img in p$preview$images) {
+        if (!is.null(img$variants$mp4$source$url)) {
+          mp4_url <- gsub("&amp;", "&", img$variants$mp4$source$url)
+          items <- append(items, list(list(url = mp4_url, preview = NULL, title = "Animated", type = "video", author = author, date = post_date, upvotes = upvotes)))
+        } else if (!is.null(img$variants$gif$source$url)) {
+          gif_url <- gsub("&amp;", "&", img$variants$gif$source$url)
+          items <- append(items, list(list(url = gif_url, preview = NULL, title = "GIF", type = "gif", author = author, date = post_date, upvotes = upvotes)))
+        }
       }
     }
-  }
+  }, error = function(e) NULL)
   
   # Convert gifv to mp4
   for (i in seq_along(items)) {
@@ -199,15 +256,51 @@ get_media <- function(p) {
   items
 }
 
-fname <- function(url, i) {
+# Generate filename from metadata: {date}_{author}_{title}.ext
+fname <- function(url, i, item = NULL) {
+  # Determine extension from URL
   n <- gsub("\\?.*$", "", basename(url))
-  if (grepl("DASH_\\d+", n)) {
-    n <- paste0("video_", sprintf("%04d", i), ".mp4")
-  } else if (nchar(n) < 3 || !grepl("\\.", n)) {
-    ext <- if (grepl("\\.gif", url, TRUE)) ".gif" else if (grepl("\\.mp4|DASH|redgifs", url, TRUE)) ".mp4" else ".jpg"
-    n <- paste0("media_", sprintf("%04d", i), ext)
+  if (grepl("DASH_\\d+", n) || grepl("\\.mp4|DASH|redgifs", url, TRUE)) {
+    ext <- ".mp4"
+  } else if (grepl("\\.gif", url, TRUE)) {
+    ext <- ".gif"
+  } else if (grepl("\\.png", url, TRUE)) {
+    ext <- ".png"
+  } else if (grepl("\\.webp", url, TRUE)) {
+    ext <- ".webp"
+  } else if (nchar(n) >= 3 && grepl("\\.", n)) {
+    ext <- paste0(".", tools::file_ext(n))
+  } else {
+    ext <- ".jpg"
   }
-  gsub("\\.gifv$", ".mp4", gsub("[<>:\"/\\|?*]", "_", n), ignore.case = TRUE)
+  
+  # Use metadata if available
+  if (!is.null(item) && !is.null(item$date) && !is.null(item$author) && !is.null(item$title)) {
+    # Clean title for filename (remove special chars, limit length)
+    clean_title <- gsub("[<>:\"/\\\\|?*]", "", item$title)
+    clean_title <- gsub("\\s+", "_", clean_title)
+    clean_title <- substr(clean_title, 1, 40)  # Limit title length
+    clean_title <- gsub("_+$", "", clean_title)  # Remove trailing underscores
+    
+    clean_author <- gsub("[<>:\"/\\\\|?*]", "_", item$author)
+    
+    # Format: date_author_title.ext
+    filename <- paste0(item$date, "_", clean_author, "_", clean_title, ext)
+  } else {
+    # Fallback to old naming
+    if (grepl("DASH_\\d+", n)) {
+      filename <- paste0("video_", sprintf("%04d", i), ext)
+    } else if (nchar(n) < 3 || !grepl("\\.", n)) {
+      filename <- paste0("media_", sprintf("%04d", i), ext)
+    } else {
+      filename <- n
+    }
+  }
+  
+  # Clean any remaining invalid chars and convert gifv
+  filename <- gsub("\\.gifv$", ".mp4", filename, ignore.case = TRUE)
+  filename <- gsub("[<>:\"/\\\\|?*]", "_", filename)
+  filename
 }
 
 dl <- function(url, path, is_redgifs = FALSE) {
@@ -286,7 +379,7 @@ ui <- fluidPage(
       .btn:disabled{opacity:0.5;cursor:not-allowed;transform:none;box-shadow:4px 4px 0px 0px #000000}
       
       /* Stats grid */
-      .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+      .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px}
       .stat{background:#FFFFFF;border:2px solid #000000;padding:15px;text-align:center;box-shadow:3px 3px 0px 0px #000000}
       .stat b{font-family:'Space Grotesk',sans-serif;font-size:28px;display:block;color:#222222}
       .stat span{font-size:10px;color:#666666;text-transform:uppercase;letter-spacing:1px}
@@ -308,6 +401,17 @@ ui <- fluidPage(
       .irs--shiny .irs-line{background:#E5E5E0;border:2px solid #000000}
       .irs--shiny .irs-handle{box-shadow:2px 2px 0px 0px #000000}
       
+      /* Scan All checkbox styling */
+      #scan_all{width:18px;height:18px;margin:0;cursor:pointer;accent-color:#4F46E5}
+      .checkbox label{margin:0;padding:0}
+      
+      /* Sort mode checkboxes */
+      .sort-check{background:#FFFFFF;border:2px solid #000;padding:6px 8px;font-size:11px}
+      .sort-check .shiny-input-container{width:auto!important;margin:0}
+      .sort-check .checkbox{margin:0}
+      .sort-check label{font-size:11px;font-weight:700;cursor:pointer}
+      .sort-check input[type=checkbox]{width:14px;height:14px;accent-color:#4F46E5;cursor:pointer}
+      
       /* Preview grid */
       .preview-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:15px;margin-top:15px;max-height:500px;overflow-y:auto;padding:5px}
       
@@ -327,6 +431,10 @@ ui <- fluidPage(
       
       /* Preview type badge */
       .preview-type{position:absolute;top:8px;right:8px;background:#222222;color:#FFFFFF;padding:3px 8px;font-size:10px;text-transform:uppercase;font-weight:700;border:2px solid #000000}
+      
+      /* Preview upvotes badge */
+      .preview-upvotes{position:absolute;top:8px;right:65px;background:#FF5722;color:#FFFFFF;padding:3px 8px;font-size:10px;font-weight:700;border:2px solid #000000;display:flex;align-items:center;gap:4px}
+      .preview-upvotes i{font-size:10px}
       
       /* Preview checkbox */
       .preview-check{position:absolute;top:8px;left:8px;width:22px;height:22px;background:#FFFFFF;border:2px solid #000000;cursor:pointer;display:flex;align-items:center;justify-content:center;z-index:10;box-shadow:2px 2px 0px 0px #000000}
@@ -359,10 +467,22 @@ ui <- fluidPage(
   ),
   div(class="bar",div(class="dots",span(class="dot r"),span(class="dot y"),span(class="dot g")),span(class="title","REDDIT MEDIA DOWNLOADER")),
   div(class="main",
-    div(class="box",h1("REDDIT DOWNLOADER")),
+    div(class="box",h1("REDDIT DOWNLOADER"),
+      div(style="text-align:center;margin-top:8px;font-size:12px;color:#666",
+        tags$i(class="fa fa-users"), " Subreddits ", tags$span(style="margin:0 8px","•"),
+        tags$i(class="fa fa-user"), " User Profiles ", tags$span(style="margin:0 8px","•"),
+        tags$i(class="fa fa-images"), " Galleries"
+      )
+    ),
     div(class="box",
-      tags$label(tags$i(class="fa fa-link")," Subreddit URL"),
-      textInput("url",NULL,placeholder="https://www.reddit.com/r/pics/",width="100%"),
+      tags$label(tags$i(class="fa fa-link")," Reddit URL (Subreddit or User)"),
+      textInput("url",NULL,placeholder="r/pics or u/username or full URL",width="100%"),
+      div(style="font-size:11px;color:#666;margin-top:5px",
+        "Examples: ", tags$code("https://reddit.com/r/pics"), ", ",
+        tags$code("https://reddit.com/user/username"), ", ",
+        tags$code("r/earthporn"), ", ",
+        tags$code("u/gallowboob")
+      ),
       
       tags$label(style="margin-top:10px",tags$i(class="fa fa-sort")," Sort By"),
       selectInput("sort_by", NULL, choices = list(
@@ -383,10 +503,82 @@ ui <- fluidPage(
       ),
       
       tags$label(style="margin-top:10px",tags$i(class="fa fa-list")," Pages to Scan"),
-      sliderInput("pages",NULL,1,1000,10,width="100%"),
+      div(style="display:flex;align-items:center;gap:15px;margin-bottom:10px",
+        div(style="flex:1", 
+          conditionalPanel(
+            condition = "!input.scan_all",
+            sliderInput("pages",NULL,1,1000,10,width="100%")
+          ),
+          conditionalPanel(
+            condition = "input.scan_all",
+            div(style="padding:12px;background:#F5F5F0;border:2px solid #000;font-weight:700",
+              div(style="text-align:center;margin-bottom:10px",
+                tags$i(class="fa fa-infinity"), " FULL SCAN: Select sort modes to search"
+              ),
+              div(style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px",
+                div(class="sort-check",
+                  checkboxInput("sort_new", "New", value = TRUE, width = "100%")
+                ),
+                div(class="sort-check",
+                  checkboxInput("sort_hot", "Hot", value = TRUE, width = "100%")
+                ),
+                div(class="sort-check",
+                  checkboxInput("sort_rising", "Rising", value = TRUE, width = "100%")
+                ),
+                div(class="sort-check",
+                  checkboxInput("sort_top_all", "Top All", value = TRUE, width = "100%")
+                ),
+                div(class="sort-check",
+                  checkboxInput("sort_top_year", "Top Year", value = TRUE, width = "100%")
+                ),
+                div(class="sort-check",
+                  checkboxInput("sort_top_month", "Top Month", value = TRUE, width = "100%")
+                ),
+                div(class="sort-check",
+                  checkboxInput("sort_top_week", "Top Week", value = FALSE, width = "100%")
+                ),
+                div(class="sort-check",
+                  checkboxInput("sort_top_day", "Top Day", value = FALSE, width = "100%")
+                )
+              )
+            )
+          )
+        ),
+        div(style="display:flex;align-items:center;gap:8px;padding:10px 15px;background:#FFFFFF;border:2px solid #000;box-shadow:3px 3px 0px 0px #000;cursor:pointer",
+          checkboxInput("scan_all", NULL, value = FALSE, width = "auto"),
+          tags$label(`for`="scan_all", style="cursor:pointer;font-weight:700;font-size:12px;margin:0", "FULL SCAN")
+        )
+      ),
+      div(style="font-size:11px;color:#666;margin-top:5px;margin-bottom:10px",
+        tags$i(class="fa fa-info-circle"), " Full Scan searches selected sort modes to find maximum media. Duplicates are automatically skipped."
+      ),
+      
+      # Upvote Filter Section
+      div(style="margin-top:15px;padding:12px;background:#FFF8E1;border:2px solid #000;box-shadow:3px 3px 0px 0px #000",
+        div(style="display:flex;align-items:center;gap:8px;margin-bottom:10px",
+          tags$i(class="fa fa-arrow-up", style="color:#FF5722"),
+          tags$b("Upvote Filter"),
+          span(style="font-size:11px;color:#666", "(optional)")
+        ),
+        div(style="display:grid;grid-template-columns:1fr 1fr;gap:10px",
+          div(
+            tags$label(style="font-size:11px;font-weight:600", "Min Upvotes"),
+            textInput("min_upvotes", NULL, value = "", placeholder = "e.g. 500", width = "100%")
+          ),
+          div(
+            tags$label(style="font-size:11px;font-weight:600", "Max Upvotes"),
+            textInput("max_upvotes", NULL, value = "", placeholder = "e.g. 10000", width = "100%")
+          )
+        ),
+        div(style="font-size:10px;color:#666;margin-top:5px",
+          tags$i(class="fa fa-info-circle"), " Leave empty for no limit. Use both for range filter."
+        )
+      ),
+      
       div(class="btns",
         actionButton("scan",tagList(tags$i(class="fa fa-search")," SCAN"),class="btn p"),
-        actionButton("stop",tagList(tags$i(class="fa fa-stop")," STOP"),class="btn")
+        actionButton("stop",tagList(tags$i(class="fa fa-stop")," STOP"),class="btn"),
+        actionButton("clear_history",tagList(tags$i(class="fa fa-trash")," CLEAR HISTORY"),class="btn")
       )
     ),
     
@@ -396,6 +588,7 @@ ui <- fluidPage(
     div(class="box",
       div(class="stats",
         div(class="stat",tags$b(id="n1","0"),span("found")),
+        div(class="stat",tags$b(id="n5","0"),span("skipped")),
         div(class="stat",tags$b(id="n2","0"),span("downloaded")),
         div(class="stat",tags$b(id="n3","0"),span("failed")),
         div(class="stat",tags$b(id="n4","0%"),span("progress"))
@@ -418,6 +611,7 @@ ui <- fluidPage(
       if(d.n2 !== undefined) document.getElementById('n2').textContent = d.n2;
       if(d.n3 !== undefined) document.getElementById('n3').textContent = d.n3;
       if(d.n4 !== undefined) document.getElementById('n4').textContent = d.n4 + '%';
+      if(d.n5 !== undefined) document.getElementById('n5').textContent = d.n5;
       if(d.pb !== undefined) document.getElementById('pb').style.width = d.pb + '%';
       if(d.st !== undefined) document.getElementById('st').textContent = d.st;
       if(d.lg !== undefined) {
@@ -550,11 +744,17 @@ server <- function(input, output, session) {
   e$pg <- 0
   e$maxpg <- 5
   e$base <- ""
+  e$base_url <- ""  # Store base subreddit URL
   e$after <- NULL
   e$found <- 0
   e$done <- 0
   e$fail <- 0
+  e$skipped <- 0
+  e$scan_all <- FALSE
+  e$sort_modes <- c("new", "hot", "top_all", "top_year", "top_month", "top_week", "top_day", "rising")
+  e$current_sort_idx <- 1
   e$downloaded_hashes <- c()
+  e$all_found_urls <- c()  # Track all URLs found across all scans in this session
   e$scanning <- FALSE
   e$downloading <- FALSE
   
@@ -563,7 +763,8 @@ server <- function(input, output, session) {
     items = list(),
     selected = c(),
     show_preview = FALSE,
-    failed_items = c()  # Track indices of failed downloads
+    failed_items = c(),  # Track indices of failed downloads
+    skipped_count = 0  # Track duplicates skipped in current scan
   )
   
   # Setup folder chooser
@@ -634,6 +835,11 @@ server <- function(input, output, session) {
               if(is_selected) tags$i(class="fa fa-check") else NULL
             ),
             span(class="preview-type", item$type),
+            # Upvote badge
+            span(class="preview-upvotes", title = "Upvotes",
+              tags$i(class="fa fa-arrow-up"),
+              format(if (!is.null(item$upvotes)) item$upvotes else 0, big.mark = ",")
+            ),
             # Clicking the thumbnail opens media in modal
             div(class="preview-thumb",
               onclick = paste0("event.stopPropagation(); viewMedia('", gsub("'", "\\'", view_url), "', '", item$type, "', event)"),
@@ -691,36 +897,164 @@ server <- function(input, output, session) {
     session$sendCustomMessage("updateSelectionCount", list(count = 0, total = length(rv$items)))
   })
   
+  # Helper function to get sort URL
+  get_sort_url <- function(base_url, sort_mode) {
+    if (sort_mode == "hot") {
+      paste0(base_url, "/hot.json")
+    } else if (sort_mode == "new") {
+      paste0(base_url, "/new.json")
+    } else if (sort_mode == "rising") {
+      paste0(base_url, "/rising.json")
+    } else if (sort_mode == "top_all") {
+      paste0(base_url, "/top.json?t=all")
+    } else if (sort_mode == "top_year") {
+      paste0(base_url, "/top.json?t=year")
+    } else if (sort_mode == "top_month") {
+      paste0(base_url, "/top.json?t=month")
+    } else if (sort_mode == "top_week") {
+      paste0(base_url, "/top.json?t=week")
+    } else if (sort_mode == "top_day") {
+      paste0(base_url, "/top.json?t=day")
+    } else {
+      paste0(base_url, "/.json")
+    }
+  }
+  
+  # Helper to get friendly sort name
+  get_sort_name <- function(sort_mode) {
+    switch(sort_mode,
+      "hot" = "Hot",
+      "new" = "New",
+      "rising" = "Rising",
+      "top_all" = "Top (All Time)",
+      "top_year" = "Top (Year)",
+      "top_month" = "Top (Month)",
+      "top_week" = "Top (Week)",
+      "top_day" = "Top (Day)",
+      sort_mode
+    )
+  }
+  
+  # Helper to apply upvote filter and sort
+  apply_upvote_filter <- function(items) {
+    if (length(items) == 0) return(items)
+    
+    # Get filter values from stored e$ values (captured at scan start)
+    min_up <- e$min_upvotes
+    max_up <- e$max_upvotes
+    
+    filtered_items <- items
+    filtered_count <- 0
+    
+    # Apply min filter
+    if (!is.na(min_up) && min_up > 0) {
+      before_count <- length(filtered_items)
+      filtered_items <- Filter(function(x) {
+        ups <- if (!is.null(x$upvotes)) x$upvotes else 0
+        ups >= min_up
+      }, filtered_items)
+      filtered_count <- filtered_count + (before_count - length(filtered_items))
+    }
+    
+    # Apply max filter
+    if (!is.na(max_up) && max_up > 0) {
+      before_count <- length(filtered_items)
+      filtered_items <- Filter(function(x) {
+        ups <- if (!is.null(x$upvotes)) x$upvotes else 0
+        ups <= max_up
+      }, filtered_items)
+      filtered_count <- filtered_count + (before_count - length(filtered_items))
+    }
+    
+    # Sort by upvotes (descending)
+    if (length(filtered_items) > 0) {
+      upvote_order <- order(sapply(filtered_items, function(x) if (!is.null(x$upvotes)) x$upvotes else 0), decreasing = TRUE)
+      filtered_items <- filtered_items[upvote_order]
+    }
+    
+    # Log filter info
+    if (filtered_count > 0) {
+      filter_msg <- ""
+      if (!is.na(min_up) && min_up > 0 && !is.na(max_up) && max_up > 0) {
+        filter_msg <- paste0("Upvote filter: ", min_up, " - ", max_up)
+      } else if (!is.na(min_up) && min_up > 0) {
+        filter_msg <- paste0("Upvote filter: >= ", min_up)
+      } else if (!is.na(max_up) && max_up > 0) {
+        filter_msg <- paste0("Upvote filter: <= ", max_up)
+      }
+      log(paste0(filter_msg, " (", filtered_count, " filtered out)"), "i")
+    }
+    
+    return(filtered_items)
+  }
+  
   # Scan function
   scan_next <- function() {
     tryCatch({
-      if (!e$run || e$pg >= e$maxpg) {
+      # Check stop condition - for scan_all mode, only stop when all sort modes exhausted
+      if (!e$run || (!e$scan_all && e$pg >= e$maxpg)) {
         # Scanning complete
         e$scanning <- FALSE
+        total_found <- length(e$items)
+        # Apply upvote filter and sort
+        e$items <- apply_upvote_filter(e$items)
         e$found <- length(e$items)
+        filtered_count <- total_found - e$found
         rv$items <- e$items
         rv$selected <- seq_along(e$items)  # Select all by default
         rv$show_preview <- TRUE
-        upd(n1 = e$found, st = paste("Found", e$found, "media files - Select and download"))
-        log(paste("Scan complete.", e$found, "files found"), "s")
+        rv$skipped_count <- e$skipped
+        skip_msg <- if (e$skipped > 0) paste0(" (", e$skipped, " duplicates skipped)") else ""
+        filter_msg <- if (filtered_count > 0) paste0(" (", filtered_count, " filtered by upvotes)") else ""
+        upd(n1 = e$found, st = paste0("Found ", e$found, " media files", skip_msg, filter_msg, " - Select and download"))
+        log(paste0("Scan complete. ", e$found, " files found", if (e$skipped > 0) paste0(", ", e$skipped, " duplicates skipped") else ""), "s")
         return()
       }
       
       e$pg <- e$pg + 1
-      upd(st = paste("Scanning page", e$pg, "/", e$maxpg))
+      if (e$scan_all) {
+        current_sort <- e$sort_modes[e$current_sort_idx]
+        upd(st = paste0("[", e$current_sort_idx, "/", length(e$sort_modes), " ", get_sort_name(current_sort), "] Page ", e$pg))
+      } else {
+        upd(st = paste("Scanning page", e$pg, "/", e$maxpg))
+      }
       log(paste("Scanning page", e$pg))
       
       data <- fetch_page(e$base, e$after)
       
       # Check if we got valid data
       if (is.null(data) || is.null(data$data) || is.null(data$data$children) || length(data$data$children) == 0) {
-        # No more pages available - finish scan
+        # No more pages available for current sort
+        if (e$scan_all && e$current_sort_idx < length(e$sort_modes)) {
+          # Move to next sort mode
+          e$current_sort_idx <- e$current_sort_idx + 1
+          e$pg <- 0
+          e$after <- NULL
+          next_sort <- e$sort_modes[e$current_sort_idx]
+          e$base <- get_sort_url(e$base_url, next_sort)
+          log(paste0("Switching to: ", get_sort_name(next_sort), " [", e$current_sort_idx, "/", length(e$sort_modes), "]"), "i")
+          later::later(scan_next, 0.5)
+          return()
+        }
+        
+        # All sort modes exhausted or not in scan_all mode - finish scan
+        total_found <- length(e$items)
+        # Apply upvote filter and sort
+        e$items <- apply_upvote_filter(e$items)
         e$found <- length(e$items)
+        filtered_count <- total_found - e$found
         rv$items <- e$items
         rv$selected <- seq_along(e$items)
         rv$show_preview <- TRUE
-        upd(n1 = e$found, st = paste("Found", e$found, "media files - Select and download"))
-        log(paste("Reached end of available pages. Scan complete.", e$found, "files found"), "s")
+        rv$skipped_count <- e$skipped
+        skip_msg <- if (e$skipped > 0) paste0(" (", e$skipped, " duplicates skipped)") else ""
+        filter_msg <- if (filtered_count > 0) paste0(" (", filtered_count, " filtered by upvotes)") else ""
+        upd(n1 = e$found, st = paste0("Found ", e$found, " media files", skip_msg, filter_msg, " - Select and download"))
+        if (e$scan_all) {
+          log(paste0("All sort modes scanned. ", e$found, " files found", if (e$skipped > 0) paste0(", ", e$skipped, " duplicates skipped") else ""), "s")
+        } else {
+          log(paste0("Reached end of available pages. ", e$found, " files found", if (e$skipped > 0) paste0(", ", e$skipped, " duplicates skipped") else ""), "s")
+        }
         e$scanning <- FALSE
         return()
       }
@@ -728,11 +1062,25 @@ server <- function(input, output, session) {
       for (child in data$data$children) {
         if (!is.null(child$data)) {
           new_items <- get_media(child$data)
-          e$items <- append(e$items, new_items)
+          
+          # Filter out items already found in previous scans
+          for (item in new_items) {
+            url_key <- normalize_url(gsub("^REDGIFS:", "", item$url))
+            url_base <- basename(gsub("\\?.*$", "", url_key))
+            item_key <- paste0(item$title, "|", url_base)
+            
+            if (item_key %in% e$all_found_urls) {
+              e$skipped <- e$skipped + 1
+              upd(n5 = e$skipped)
+            } else {
+              e$all_found_urls <- c(e$all_found_urls, item_key)
+              e$items <- append(e$items, list(item))
+            }
+          }
         }
       }
       
-      # Remove duplicates
+      # Remove duplicates within current scan
       if (length(e$items) > 0) {
         # Create unique key from title and URL base
         keys <- sapply(e$items, function(x) {
@@ -752,20 +1100,39 @@ server <- function(input, output, session) {
       # Check for next page token
       e$after <- data$data$after
       if (is.null(e$after) || is.na(e$after) || e$after == "") {
-        # No more pages - stop scanning
-        e$pg <- e$maxpg
+        # No more pages for current sort
+        if (e$scan_all && e$current_sort_idx < length(e$sort_modes)) {
+          # Move to next sort mode
+          e$current_sort_idx <- e$current_sort_idx + 1
+          e$pg <- 0
+          e$after <- NULL
+          next_sort <- e$sort_modes[e$current_sort_idx]
+          e$base <- get_sort_url(e$base_url, next_sort)
+          log(paste0("Switching to: ", get_sort_name(next_sort), " [", e$current_sort_idx, "/", length(e$sort_modes), "]"), "i")
+        } else if (!e$scan_all) {
+          # Normal mode - stop scanning
+          e$pg <- e$maxpg
+        }
+        # In scan_all mode with all sorts done, the next iteration will complete
       }
       
       later::later(scan_next, 0.5)
     }, error = function(err) {
       # Handle any unexpected errors gracefully
       log(paste("Scan error:", err$message), "e")
+      total_found <- length(e$items)
+      # Apply upvote filter and sort
+      e$items <- apply_upvote_filter(e$items)
       e$found <- length(e$items)
+      filtered_count <- total_found - e$found
       rv$items <- e$items
       rv$selected <- seq_along(e$items)
       rv$show_preview <- TRUE
-      upd(n1 = e$found, st = paste("Found", e$found, "media files - Select and download"))
-      log(paste("Scan stopped due to error.", e$found, "files found"), "s")
+      rv$skipped_count <- e$skipped
+      skip_msg <- if (e$skipped > 0) paste0(" (", e$skipped, " duplicates skipped)") else ""
+      filter_msg <- if (filtered_count > 0) paste0(" (", filtered_count, " filtered by upvotes)") else ""
+      upd(n1 = e$found, st = paste0("Found ", e$found, " media files", skip_msg, filter_msg, " - Select and download"))
+      log(paste0("Scan stopped due to error. ", e$found, " files found", if (e$skipped > 0) paste0(", ", e$skipped, " duplicates skipped") else ""), "s")
       e$scanning <- FALSE
     })
   }
@@ -805,9 +1172,18 @@ server <- function(input, output, session) {
       }
       
       url <- result$url
-      fn <- paste0(result$id, ".mp4")
+      # Use metadata naming for redgifs too
+      if (!is.null(item$date) && !is.null(item$author)) {
+        clean_title <- gsub("[<>:\"/\\\\|?*]", "", item$title)
+        clean_title <- gsub("\\s+", "_", clean_title)
+        clean_title <- substr(clean_title, 1, 40)
+        clean_author <- gsub("[<>:\"/\\\\|?*]", "_", item$author)
+        fn <- paste0(item$date, "_", clean_author, "_", clean_title, ".mp4")
+      } else {
+        fn <- paste0(result$id, ".mp4")
+      }
     } else {
-      fn <- fname(url, e$i)
+      fn <- fname(url, e$i, item)
     }
     
     fp <- file.path(e$dir, fn)
@@ -860,47 +1236,164 @@ server <- function(input, output, session) {
     e$found <- 0
     e$done <- 0
     e$fail <- 0
+    e$skipped <- 0  # Reset skipped count for this scan
+    e$scan_all <- isTRUE(input$scan_all)  # Store scan_all setting
+    # Note: e$all_found_urls is NOT reset - keeps tracking across scans
+    
+    # Store upvote filter values at scan start (reactive values captured here)
+    e$min_upvotes <- suppressWarnings(as.numeric(input$min_upvotes))
+    e$max_upvotes <- suppressWarnings(as.numeric(input$max_upvotes))
     
     rv$items <- list()
     rv$selected <- c()
     rv$show_preview <- FALSE
+    rv$skipped_count <- 0
     
-    upd(n1 = 0, n2 = 0, n3 = 0, n4 = 0, pb = 0, st = "Scanning...")
+    upd(n1 = 0, n2 = 0, n3 = 0, n4 = 0, n5 = 0, pb = 0, st = "Scanning...")
     session$sendCustomMessage("upd", list(lg = ""))
     
-    sub <- str_match(input$url, "/r/([^/]+)")[1, 2]
-    if (is.na(sub)) sub <- "reddit"
+    # Normalize and parse input URL - support many formats
+    input_url <- trimws(input$url)
     
-    # Construct base URL with sorting
-    base_url <- gsub("(^https?://[^/]+)?(/r/[^/]+).*", "\\1\\2", input$url)
-    if (!grepl("^https?://", base_url)) base_url <- paste0("https://www.reddit.com", base_url)
+    # Remove any trailing slashes
+    input_url <- gsub("/+$", "", input_url)
+    
+    # Detect user or subreddit from various input formats
+    # Patterns to match:
+    # - r/pics, /r/pics
+    # - u/username, /u/username
+    # - user/username, /user/username
+    # - reddit.com/r/pics, www.reddit.com/r/pics
+    # - https://reddit.com/r/pics, https://www.reddit.com/r/pics
+    # - old.reddit.com/r/pics, etc.
+    
+    is_user <- FALSE
+    target_name <- NULL
+    
+    # Check for user patterns first
+    # Match: u/username, /u/username, user/username, /user/username
+    user_patterns <- c(
+      "^u/([^/\\s]+)",           # u/username
+      "^/u/([^/\\s]+)",          # /u/username
+      "^user/([^/\\s]+)",        # user/username
+      "^/user/([^/\\s]+)",       # /user/username
+      "/u/([^/\\s]+)",           # .../u/username
+      "/user/([^/\\s]+)"         # .../user/username
+    )
+    
+    for (pattern in user_patterns) {
+      m <- str_match(input_url, pattern)
+      if (!is.na(m[1, 2])) {
+        is_user <- TRUE
+        target_name <- m[1, 2]
+        break
+      }
+    }
+    
+    # If not user, check for subreddit patterns
+    if (!is_user) {
+      sub_patterns <- c(
+        "^r/([^/\\s]+)",          # r/pics
+        "^/r/([^/\\s]+)",         # /r/pics
+        "/r/([^/\\s]+)"           # .../r/pics
+      )
+      
+      for (pattern in sub_patterns) {
+        m <- str_match(input_url, pattern)
+        if (!is.na(m[1, 2])) {
+          target_name <- m[1, 2]
+          break
+        }
+      }
+    }
+    
+    # If still no match, treat the whole input as a subreddit name
+    if (is.null(target_name) || target_name == "") {
+      # Remove any URL prefixes and treat as subreddit name
+      clean_input <- gsub("^(https?://)?(www\\.)?(old\\.)?(new\\.)?reddit\\.com/?", "", input_url)
+      clean_input <- gsub("^/", "", clean_input)
+      if (nchar(clean_input) > 0 && !grepl("/", clean_input)) {
+        target_name <- clean_input
+      } else {
+        target_name <- "pics"  # Default fallback
+      }
+    }
+    
+    target_type <- if (is_user) "user" else "subreddit"
+    
+    # Construct base URL
+    if (is_user) {
+      base_url <- paste0("https://www.reddit.com/user/", target_name, "/submitted")
+    } else {
+      base_url <- paste0("https://www.reddit.com/r/", target_name)
+    }
+    
+    # Store base URL for scan_all mode
+    e$base_url <- base_url
     
     # Add sorting path and time parameter
     sort_opt <- input$sort_by
-    if (sort_opt == "hot") {
-      e$base <- paste0(base_url, "/hot.json")
-    } else if (sort_opt == "new") {
-      e$base <- paste0(base_url, "/new.json")
-    } else if (sort_opt == "rising") {
-      e$base <- paste0(base_url, "/rising.json")
-    } else if (sort_opt == "top_all") {
-      e$base <- paste0(base_url, "/top.json?t=all")
-    } else if (sort_opt == "top_year") {
-      e$base <- paste0(base_url, "/top.json?t=year")
-    } else if (sort_opt == "top_month") {
-      e$base <- paste0(base_url, "/top.json?t=month")
-    } else if (sort_opt == "top_week") {
-      e$base <- paste0(base_url, "/top.json?t=week")
-    } else if (sort_opt == "top_day") {
-      e$base <- paste0(base_url, "/top.json?t=day")
+    
+    if (e$scan_all) {
+      # Build sort modes list from user selection
+      selected_sorts <- c()
+      if (isTRUE(input$sort_new)) selected_sorts <- c(selected_sorts, "new")
+      if (isTRUE(input$sort_hot)) selected_sorts <- c(selected_sorts, "hot")
+      if (isTRUE(input$sort_rising)) selected_sorts <- c(selected_sorts, "rising")
+      if (isTRUE(input$sort_top_all)) selected_sorts <- c(selected_sorts, "top_all")
+      if (isTRUE(input$sort_top_year)) selected_sorts <- c(selected_sorts, "top_year")
+      if (isTRUE(input$sort_top_month)) selected_sorts <- c(selected_sorts, "top_month")
+      if (isTRUE(input$sort_top_week)) selected_sorts <- c(selected_sorts, "top_week")
+      if (isTRUE(input$sort_top_day)) selected_sorts <- c(selected_sorts, "top_day")
+      
+      if (length(selected_sorts) == 0) {
+        # If nothing selected, default to "new"
+        selected_sorts <- c("new")
+        log("No sort modes selected, defaulting to New", "i")
+      }
+      
+      e$sort_modes <- selected_sorts
+      e$current_sort_idx <- 1
+      e$base <- get_sort_url(base_url, e$sort_modes[1])
     } else {
-      e$base <- paste0(base_url, "/.json")
+      # Normal mode - use selected sort
+      if (sort_opt == "hot") {
+        e$base <- paste0(base_url, "/hot.json")
+      } else if (sort_opt == "new") {
+        e$base <- paste0(base_url, "/new.json")
+      } else if (sort_opt == "rising") {
+        e$base <- paste0(base_url, "/rising.json")
+      } else if (sort_opt == "top_all") {
+        e$base <- paste0(base_url, "/top.json?t=all")
+      } else if (sort_opt == "top_year") {
+        e$base <- paste0(base_url, "/top.json?t=year")
+      } else if (sort_opt == "top_month") {
+        e$base <- paste0(base_url, "/top.json?t=month")
+      } else if (sort_opt == "top_week") {
+        e$base <- paste0(base_url, "/top.json?t=week")
+      } else if (sort_opt == "top_day") {
+        e$base <- paste0(base_url, "/top.json?t=day")
+      } else {
+        e$base <- paste0(base_url, "/.json")
+      }
     }
     
     e$maxpg <- input$pages
     
-    log(paste("Target:", sub))
-    log(paste("Scanning", e$maxpg, "pages..."))
+    # Log target info
+    if (is_user) {
+      log(paste0("Target: u/", target_name, " (User Profile)"))
+    } else {
+      log(paste0("Target: r/", target_name, " (Subreddit)"))
+    }
+    
+    if (e$scan_all) {
+      sort_names <- sapply(e$sort_modes, get_sort_name)
+      log(paste0("FULL SCAN MODE: Searching ", length(e$sort_modes), " sort mode(s): ", paste(sort_names, collapse = ", ")))
+      log(paste0("Starting with: ", get_sort_name(e$sort_modes[1])), "i")
+    } else {
+      log(paste("Scanning", e$maxpg, "pages..."))
+    }
     
     later::later(scan_next, 0.2)
   })
@@ -927,10 +1420,53 @@ server <- function(input, output, session) {
       e$dir <- getwd()
     }
     
-    # Create subfolder with subreddit name and timestamp
-    sub <- str_match(input$url, "/r/([^/]+)")[1, 2]
-    if (is.na(sub)) sub <- "reddit"
-    e$dir <- file.path(e$dir, paste0(sub, "_", format(Sys.time(), "%Y%m%d_%H%M%S")))
+    # Parse input URL to detect user or subreddit (same logic as scan)
+    input_url <- trimws(input$url)
+    input_url <- gsub("/+$", "", input_url)
+    
+    is_user_dl <- FALSE
+    target_name_dl <- NULL
+    
+    # Check for user patterns
+    user_patterns <- c("^u/([^/\\s]+)", "^/u/([^/\\s]+)", "^user/([^/\\s]+)", "^/user/([^/\\s]+)", "/u/([^/\\s]+)", "/user/([^/\\s]+)")
+    for (pattern in user_patterns) {
+      m <- str_match(input_url, pattern)
+      if (!is.na(m[1, 2])) {
+        is_user_dl <- TRUE
+        target_name_dl <- m[1, 2]
+        break
+      }
+    }
+    
+    # Check for subreddit patterns
+    if (!is_user_dl) {
+      sub_patterns <- c("^r/([^/\\s]+)", "^/r/([^/\\s]+)", "/r/([^/\\s]+)")
+      for (pattern in sub_patterns) {
+        m <- str_match(input_url, pattern)
+        if (!is.na(m[1, 2])) {
+          target_name_dl <- m[1, 2]
+          break
+        }
+      }
+    }
+    
+    # Fallback
+    if (is.null(target_name_dl) || target_name_dl == "") {
+      clean_input <- gsub("^(https?://)?(www\\.)?(old\\.)?(new\\.)?reddit\\.com/?", "", input_url)
+      clean_input <- gsub("^/", "", clean_input)
+      if (nchar(clean_input) > 0 && !grepl("/", clean_input)) {
+        target_name_dl <- clean_input
+      } else {
+        target_name_dl <- "reddit"
+      }
+    }
+    
+    # Create appropriate subfolder
+    if (is_user_dl) {
+      e$dir <- file.path(e$dir, "users", paste0("u_", target_name_dl, "_", format(Sys.time(), "%Y%m%d_%H%M%S")))
+    } else {
+      e$dir <- file.path(e$dir, "subreddits", paste0("r_", target_name_dl, "_", format(Sys.time(), "%Y%m%d_%H%M%S")))
+    }
     dir.create(e$dir, recursive = TRUE, showWarnings = FALSE)
     
     upd(n2 = 0, n3 = 0, n4 = 0, pb = 0, st = "Starting download...")
@@ -979,6 +1515,14 @@ server <- function(input, output, session) {
     e$run <- FALSE
     upd(st = "Stopped")
     log("Operation stopped", "e")
+  })
+  
+  # Clear History button - reset duplicate tracking
+  observeEvent(input$clear_history, {
+    e$all_found_urls <- c()
+    e$skipped <- 0
+    upd(n5 = 0, st = "History cleared - duplicates will no longer be skipped")
+    log("Duplicate history cleared. Next scan will start fresh.", "i")
   })
 }
 
